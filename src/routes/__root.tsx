@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { ThemeProvider } from "@/components/theme-provider";
+import { AuthProvider } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
 import "@/styles.css";
 
@@ -26,8 +27,8 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Eser's TanStack Start App" },
-      { name: "description", content: "A minimal, type-safe full-stack React starter template with modern tooling" },
+      { title: "Hadyaa Admin Panel" },
+      { name: "description", content: "Admin and NPO dashboard for Hadyaa projects and user management." },
     ],
   }),
   component: RootComponent,
@@ -38,7 +39,9 @@ function RootComponent() {
   return (
     <RootDocument>
       <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-        <Outlet />
+        <AuthProvider>
+          <Outlet />
+        </AuthProvider>
       </ThemeProvider>
     </RootDocument>
   );
