@@ -50,6 +50,9 @@ export interface Project {
   title: string;
   categoryId: number;
   category?: Category | null;
+  createdAt?: string;
+  createdOn?: string;
+  modifiedOn?: string | null;
   startDate: string;
   endDate?: string | null;
   description: string;

@@ -1,46 +1,136 @@
-import axios from "axios";
+import ky, { HTTPError, TimeoutError, type KyInstance, type Options } from "ky";
 import { getStoredToken } from "@/lib/auth";
-import type {
-  Address,
-  ApiErrorShape,
-  Category,
-  LoginRequest,
-  LoginResponse,
-  Project,
-  UpdateUserResponse,
-  User,
-  UserRole,
-} from "@/types/api";
+import type { Address, ApiErrorShape, Category, LoginRequest, LoginResponse, Project, UpdateUserResponse, User, UserRole } from "@/types/api";
 
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-export const API_BASE_URL =
-  configuredBaseUrl && configuredBaseUrl.length > 0
-    ? configuredBaseUrl.replace(/\/$/, "")
-    : "http://localhost:5000/api";
+const DEFAULT_API_BASE_URL = "http://localhost:5000/api";
+export const API_BASE_URL = configuredBaseUrl && configuredBaseUrl.length > 0 ? configuredBaseUrl.replace(/\/$/, "") : DEFAULT_API_BASE_URL;
+
+const NETWORK_ERROR_MESSAGE = "Unable to reach API from browser. Check VITE_API_BASE_URL, CORS, and HTTPS/HTTP mismatch.";
+const FALLBACK_ERROR_MESSAGE = "Something went wrong. Please try again.";
 
 const API_ORIGIN = (() => {
-  try {
-    return new URL(API_BASE_URL).origin;
-  } catch {
-    return "http://localhost:5000";
+  if (/^https?:\/\//i.test(API_BASE_URL)) {
+    try {
+      return new URL(API_BASE_URL).origin;
+    } catch {
+      return "";
+    }
   }
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return "";
 })();
 
-export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
+function toPrefixUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/`;
+}
+
+class ApiRequestError extends Error {
+  status?: number;
+  data?: unknown;
+
+  constructor(message: string, options?: { status?: number; data?: unknown }) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = options?.status;
+    this.data = options?.data;
+  }
+}
+
+export const apiClient: KyInstance = ky.create({
+  prefixUrl: toPrefixUrl(API_BASE_URL),
+  hooks: {
+    beforeRequest: [
+      (request) => {
+        const token = getStoredToken();
+        if (token) {
+          request.headers.set("Authorization", `Bearer ${token}`);
+        }
+      },
+    ],
   },
 });
 
-apiClient.interceptors.request.use((config) => {
-  const token = getStoredToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+async function parseErrorBody(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+
+  try {
+    if (contentType.includes("application/json")) {
+      return await response.json();
+    }
+
+    const text = await response.text();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+async function normalizeApiError(error: unknown): Promise<ApiRequestError> {
+  if (error instanceof HTTPError) {
+    const data = await parseErrorBody(error.response);
+    return new ApiRequestError(error.message, {
+      status: error.response.status,
+      data,
+    });
   }
 
-  return config;
-});
+  if (error instanceof TimeoutError) {
+    return new ApiRequestError("Request timed out.");
+  }
+
+  if (error instanceof Error) {
+    const isNetworkError = /failed to fetch|networkerror|load failed|fetch/i.test(error.message);
+    return new ApiRequestError(isNetworkError ? NETWORK_ERROR_MESSAGE : error.message);
+  }
+
+  return new ApiRequestError(FALLBACK_ERROR_MESSAGE);
+}
+
+async function requestJson<T>(path: string, options?: Options): Promise<T> {
+  try {
+    return await apiClient(path, options).json<T>();
+  } catch (error) {
+    throw await normalizeApiError(error);
+  }
+}
+
+async function requestVoid(path: string, options?: Options): Promise<void> {
+  try {
+    await apiClient(path, options);
+  } catch (error) {
+    throw await normalizeApiError(error);
+  }
+}
+
+function readApiErrorMessage(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  const apiData = data as ApiErrorShape;
+
+  if (apiData.errors) {
+    const firstError = Object.values(apiData.errors)[0]?.[0];
+    if (firstError) {
+      return firstError;
+    }
+  }
+
+  if (apiData.detail) {
+    return apiData.detail;
+  }
+
+  if (apiData.title) {
+    return apiData.title;
+  }
+
+  return null;
+}
 
 export function resolveAssetUrl(path: string | null | undefined): string {
   if (!path) {
@@ -52,33 +142,21 @@ export function resolveAssetUrl(path: string | null | undefined): string {
   }
 
   if (path.startsWith("/")) {
-    return `${API_ORIGIN}${path}`;
+    return API_ORIGIN ? `${API_ORIGIN}${path}` : path;
   }
 
-  return `${API_ORIGIN}/${path}`;
+  return API_ORIGIN ? `${API_ORIGIN}/${path}` : `/${path}`;
 }
 
 export function extractApiErrorMessage(error: unknown): string {
-  if (axios.isAxiosError(error)) {
-    const data = error.response?.data as ApiErrorShape | undefined;
-
-    if (data?.errors) {
-      const firstError = Object.values(data.errors)[0]?.[0];
-      if (firstError) {
-        return firstError;
-      }
+  if (error instanceof ApiRequestError) {
+    const parsedMessage = readApiErrorMessage(error.data);
+    if (parsedMessage) {
+      return parsedMessage;
     }
 
-    if (data?.detail) {
-      return data.detail;
-    }
-
-    if (data?.title) {
-      return data.title;
-    }
-
-    if (typeof error.response?.data === "string") {
-      return error.response.data;
+    if (typeof error.data === "string" && error.data.trim().length > 0) {
+      return error.data;
     }
 
     if (error.message) {
@@ -86,22 +164,31 @@ export function extractApiErrorMessage(error: unknown): string {
     }
   }
 
-  return "Something went wrong. Please try again.";
+  if (error instanceof Error) {
+    const isNetworkError = /failed to fetch|networkerror|load failed|fetch/i.test(error.message);
+    if (isNetworkError) {
+      return NETWORK_ERROR_MESSAGE;
+    }
+
+    return error.message || FALLBACK_ERROR_MESSAGE;
+  }
+
+  return FALLBACK_ERROR_MESSAGE;
 }
 
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const response = await apiClient.post<LoginResponse>("/users/login", payload);
-  return response.data;
+  return requestJson<LoginResponse>("users/login", {
+    method: "post",
+    json: payload,
+  });
 }
 
 export async function getCategories(): Promise<Category[]> {
-  const response = await apiClient.get<Category[]>("/categories");
-  return response.data;
+  return requestJson<Category[]>("categories");
 }
 
 export async function getUsers(): Promise<User[]> {
-  const response = await apiClient.get<User[]>("/users");
-  return response.data;
+  return requestJson<User[]>("users");
 }
 
 function normalizeAddresses(addresses: Address[]): Address[] {
@@ -148,20 +235,17 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
     formData.append(`addresses[${index}].city`, address.city);
   });
 
-  payload.images.forEach((image) => {
-    formData.append("images", image);
+  payload.images.forEach((image, index) => {
+    formData.append(`images[${index}]`, image);
   });
   payload.videos.forEach((video) => {
     formData.append("videos", video);
   });
 
-  const response = await apiClient.post<Project>("/projects", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
+  return requestJson<Project>("projects", {
+    method: "post",
+    body: formData,
   });
-
-  return response.data;
 }
 
 export interface UpdateProjectPayload {
@@ -176,10 +260,7 @@ export interface UpdateProjectPayload {
   addresses: Address[];
 }
 
-export async function updateProject(
-  projectId: string,
-  payload: UpdateProjectPayload,
-): Promise<Project> {
+export async function updateProject(projectId: string, payload: UpdateProjectPayload): Promise<Project> {
   const normalizedAddresses = normalizeAddresses(payload.addresses);
 
   const body: Record<string, unknown> = {
@@ -194,21 +275,25 @@ export async function updateProject(
     addresses: normalizedAddresses,
   };
 
-  await apiClient.patch(`/projects/${projectId}`, body);
+  await requestVoid(`projects/${projectId}`, {
+    method: "patch",
+    json: body,
+  });
+
   return getProjectById(projectId);
 }
 
-export async function setProjectApproval(
-  projectId: string,
-  isApproved: boolean,
-): Promise<Project> {
-  await apiClient.patch(`/projects/${projectId}`, { isApproved });
+export async function setProjectApproval(projectId: string, isApproved: boolean): Promise<Project> {
+  await requestVoid(`projects/${projectId}`, {
+    method: "patch",
+    json: { isApproved },
+  });
+
   return getProjectById(projectId);
 }
 
 export async function getProjectById(projectId: string): Promise<Project> {
-  const response = await apiClient.get<Project>(`/projects/${projectId}`);
-  return response.data;
+  return requestJson<Project>(`projects/${projectId}`);
 }
 
 export interface AddProjectMediaPayload {
@@ -216,10 +301,7 @@ export interface AddProjectMediaPayload {
   videos: File[];
 }
 
-export async function addProjectMedia(
-  projectId: string,
-  payload: AddProjectMediaPayload,
-): Promise<Project> {
+export async function addProjectMedia(projectId: string, payload: AddProjectMediaPayload): Promise<Project> {
   const formData = new FormData();
   payload.images.forEach((file) => {
     formData.append("images", file);
@@ -228,36 +310,29 @@ export async function addProjectMedia(
     formData.append("videos", file);
   });
 
-  const response = await apiClient.put<Project>(
-    `/projects/${projectId}/images`,
-    formData,
-    {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    },
-  );
-
-  return response.data;
+  return requestJson<Project>(`projects/${projectId}/images`, {
+    method: "put",
+    body: formData,
+  });
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  await apiClient.delete(`/projects/${projectId}`);
+  await requestVoid(`projects/${projectId}`, {
+    method: "delete",
+  });
 }
 
 export async function deleteProjectImage(projectImageId: string): Promise<void> {
-  await apiClient.delete(`/project-images/${projectImageId}`);
+  await requestVoid(`project-images/${projectImageId}`, {
+    method: "delete",
+  });
 }
 
-export async function updateUserRole(
-  userId: string,
-  role: UserRole,
-): Promise<{ role: UserRole }> {
-  const response = await apiClient.patch<{ role: UserRole }>(`/users/${userId}/role`, {
-    role,
+export async function updateUserRole(userId: string, role: UserRole): Promise<{ role: UserRole }> {
+  return requestJson<{ role: UserRole }>(`users/${userId}/role`, {
+    method: "patch",
+    json: { role },
   });
-
-  return response.data;
 }
 
 export interface UpdateProfilePayload {
@@ -267,16 +342,24 @@ export interface UpdateProfilePayload {
   mobileNumber: string;
 }
 
-export async function updateOwnProfile(
-  userId: string,
-  payload: UpdateProfilePayload,
-): Promise<UpdateUserResponse> {
-  const response = await apiClient.patch<UpdateUserResponse>(`/users/${userId}`, payload);
-  return response.data;
+export async function updateOwnProfile(userId: string, payload: UpdateProfilePayload): Promise<UpdateUserResponse> {
+  return requestJson<UpdateUserResponse>(`users/${userId}`, {
+    method: "patch",
+    json: payload,
+  });
 }
 
-function compareDateDesc(a: string, b: string): number {
-  return new Date(b).getTime() - new Date(a).getTime();
+function toDateEpoch(value: string | undefined | null): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const epoch = new Date(value).getTime();
+  return Number.isNaN(epoch) ? Number.NEGATIVE_INFINITY : epoch;
+}
+
+function getProjectCreatedDate(project: Project): string | undefined {
+  return project.createdOn ?? project.createdAt ?? project.startDate;
 }
 
 export async function getProjectsForDashboard(): Promise<Project[]> {
@@ -288,12 +371,7 @@ export async function getProjectsForDashboard(): Promise<Project[]> {
 
   const categoryMap = new Map(categories.map((category) => [category.id, category]));
 
-  const projectsByCategory = await Promise.all(
-    categories.map(async (category) => {
-      const response = await apiClient.get<Project[]>(`/projects/by-category/${category.id}`);
-      return response.data;
-    }),
-  );
+  const projectsByCategory = await Promise.all(categories.map((category) => requestJson<Project[]>(`projects/by-category/${category.id}`)));
 
   const deduped = new Map<string, Project>();
 
@@ -306,5 +384,7 @@ export async function getProjectsForDashboard(): Promise<Project[]> {
     }
   });
 
-  return [...deduped.values()].sort((a, b) => compareDateDesc(a.startDate, b.startDate));
+  return [...deduped.values()].sort(
+    (a, b) => toDateEpoch(getProjectCreatedDate(b)) - toDateEpoch(getProjectCreatedDate(a)),
+  );
 }

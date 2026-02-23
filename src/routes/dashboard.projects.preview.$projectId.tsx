@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import {
-  extractApiErrorMessage,
-  getProjectById,
-  getUsers,
-  resolveAssetUrl,
-  setProjectApproval,
-} from "@/lib/api";
+import { deleteProjectImage, extractApiErrorMessage, getProjectById, getUsers, resolveAssetUrl, setProjectApproval } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NotificationToast } from "@/components/ui/notification-toast";
 import type { Project, User } from "@/types/api";
 
 export const Route = createFileRoute("/dashboard/projects/preview/$projectId")({
@@ -44,6 +40,17 @@ function formatDate(dateValue: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+interface PendingMediaDelete {
+  id: string;
+  fileName: string;
+  mediaType: "image" | "video";
+}
+
+interface ImagePreviewState {
+  src: string;
+  fileName: string;
+}
+
 function DashboardProjectPreviewPage() {
   const { projectId } = Route.useParams();
   const { session } = useAuth();
@@ -53,19 +60,13 @@ function DashboardProjectPreviewPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdatingApproval, setIsUpdatingApproval] = useState(false);
+  const [isDeletingMedia, setIsDeletingMedia] = useState(false);
+  const [mediaToDelete, setMediaToDelete] = useState<PendingMediaDelete | null>(null);
+  const [imagePreview, setImagePreview] = useState<ImagePreviewState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const userNameById = useMemo(
-    () =>
-      new Map(
-        users.map((user) => [
-          user.id,
-          `${user.firstName} ${user.lastName}`.trim() || user.email,
-        ]),
-      ),
-    [users],
-  );
+  const userNameById = useMemo(() => new Map(users.map((user) => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.email])), [users]);
 
   const loadProject = useCallback(async () => {
     if (!isAdmin) {
@@ -77,10 +78,7 @@ function DashboardProjectPreviewPage() {
     setErrorMessage(null);
 
     try {
-      const [projectResponse, usersResponse] = await Promise.all([
-        getProjectById(projectId),
-        getUsers(),
-      ]);
+      const [projectResponse, usersResponse] = await Promise.all([getProjectById(projectId), getUsers()]);
 
       setProject(projectResponse);
       setUsers(usersResponse);
@@ -94,6 +92,56 @@ function DashboardProjectPreviewPage() {
   useEffect(() => {
     void loadProject();
   }, [loadProject]);
+
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, 4500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
+
+  useEffect(() => {
+    if (!successMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSuccessMessage(null);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [successMessage]);
+
+  useEffect(() => {
+    if (!imagePreview) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setImagePreview(null);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [imagePreview]);
 
   async function onSetApproval(isApproved: boolean) {
     if (!project) {
@@ -115,6 +163,49 @@ function DashboardProjectPreviewPage() {
     }
   }
 
+  function onRequestDeleteMedia(media: PendingMediaDelete) {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setMediaToDelete(media);
+  }
+
+  async function confirmDeleteMedia() {
+    if (!project || !mediaToDelete) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setIsDeletingMedia(true);
+
+    try {
+      await deleteProjectImage(mediaToDelete.id);
+      setProject((current) => {
+        if (!current) {
+          return current;
+        }
+
+        if (mediaToDelete.mediaType === "image") {
+          return {
+            ...current,
+            images: current.images.filter((image) => image.id !== mediaToDelete.id),
+          };
+        }
+
+        return {
+          ...current,
+          videos: current.videos.filter((video) => video.id !== mediaToDelete.id),
+        };
+      });
+      setMediaToDelete(null);
+      setSuccessMessage(mediaToDelete.mediaType === "image" ? "Image removed." : "Video removed.");
+    } catch (error) {
+      setErrorMessage(extractApiErrorMessage(error));
+    } finally {
+      setIsDeletingMedia(false);
+    }
+  }
+
   if (!isAdmin) {
     return (
       <Card>
@@ -133,13 +224,86 @@ function DashboardProjectPreviewPage() {
 
   return (
     <div className="space-y-6">
+      {errorMessage ? (
+        <NotificationToast
+          type="error"
+          message={errorMessage}
+          onClose={() => {
+            setErrorMessage(null);
+          }}
+        />
+      ) : null}
+
+      {successMessage ? (
+        <NotificationToast
+          type="success"
+          message={successMessage}
+          onClose={() => {
+            setSuccessMessage(null);
+          }}
+        />
+      ) : null}
+
+      {imagePreview ? (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview ${imagePreview.fileName}`}
+          onClick={() => setImagePreview(null)}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 rounded-md bg-black/60 px-3 py-1.5 text-sm text-white transition hover:bg-black/75"
+            onClick={(event) => {
+              event.stopPropagation();
+              setImagePreview(null);
+            }}
+          >
+            Close
+          </button>
+          <img
+            src={imagePreview.src}
+            alt={imagePreview.fileName}
+            className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      ) : null}
+
+      <AlertDialog
+        open={Boolean(mediaToDelete)}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingMedia) {
+            setMediaToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {mediaToDelete?.mediaType === "video" ? "Video" : "Image"}</AlertDialogTitle>
+            <AlertDialogDescription>{mediaToDelete ? `Delete "${mediaToDelete.fileName}" from this project?` : "Delete this media item from this project?"}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingMedia}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isDeletingMedia}
+              onClick={() => {
+                void confirmDeleteMedia();
+              }}
+            >
+              {isDeletingMedia ? "Removing..." : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>Project Preview</CardTitle>
-            <CardDescription>
-              Admin-only review page to approve or disapprove projects.
-            </CardDescription>
+            <CardDescription>Admin-only review page to approve or disapprove projects.</CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" render={<Link to="/dashboard/projects" />}>
@@ -168,34 +332,16 @@ function DashboardProjectPreviewPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {errorMessage ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {errorMessage}
-            </div>
-          ) : null}
+          {isLoading ? <p className="text-sm text-muted-foreground">Loading project preview...</p> : null}
 
-          {successMessage ? (
-            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-700/70 dark:bg-emerald-900/20 dark:text-emerald-300">
-              {successMessage}
-            </div>
-          ) : null}
-
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading project preview...</p>
-          ) : null}
-
-          {!isLoading && !project ? (
-            <p className="text-sm text-muted-foreground">Project not found.</p>
-          ) : null}
+          {!isLoading && !project ? <p className="text-sm text-muted-foreground">Project not found.</p> : null}
 
           {project ? (
             <div className="space-y-6">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-xl font-semibold">{project.title}</h2>
-                  <Badge variant={project.isApproved ? "secondary" : "outline"}>
-                    {project.isApproved ? "Approved" : "Pending"}
-                  </Badge>
+                  <Badge variant={project.isApproved ? "secondary" : "outline"}>{project.isApproved ? "Approved" : "Pending"}</Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">{project.description}</p>
               </div>
@@ -207,9 +353,7 @@ function DashboardProjectPreviewPage() {
                 </div>
                 <div className="rounded-md border p-3">
                   <p className="text-xs text-muted-foreground">NPO Owner</p>
-                  <p className="font-medium">
-                    {userNameById.get(project.npoUserId) ?? project.npoUserId}
-                  </p>
+                  <p className="font-medium">{userNameById.get(project.npoUserId) ?? project.npoUserId}</p>
                 </div>
                 <div className="rounded-md border p-3">
                   <p className="text-xs text-muted-foreground">Currency</p>
@@ -237,11 +381,7 @@ function DashboardProjectPreviewPage() {
                 </div>
                 <div className="rounded-md border p-3">
                   <p className="text-xs text-muted-foreground">Approved By</p>
-                  <p className="font-medium">
-                    {project.approvedByUserId
-                      ? userNameById.get(project.approvedByUserId) ?? project.approvedByUserId
-                      : "-"}
-                  </p>
+                  <p className="font-medium">{project.approvedByUserId ? (userNameById.get(project.approvedByUserId) ?? project.approvedByUserId) : "-"}</p>
                 </div>
               </div>
 
@@ -252,10 +392,7 @@ function DashboardProjectPreviewPage() {
                 ) : (
                   <div className="grid gap-2 sm:grid-cols-2">
                     {project.addresses.map((address, index) => (
-                      <div
-                        key={`${address.country}-${address.state}-${address.city}-${index}`}
-                        className="rounded-md border p-3 text-sm"
-                      >
+                      <div key={`${address.country}-${address.state}-${address.city}-${index}`} className="rounded-md border p-3 text-sm">
                         <p>{address.country}</p>
                         <p>{address.state}</p>
                         <p>{address.city}</p>
@@ -272,12 +409,35 @@ function DashboardProjectPreviewPage() {
                 ) : (
                   <div className="flex flex-wrap gap-3">
                     {project.images.map((image) => (
-                      <img
-                        key={image.id}
-                        src={resolveAssetUrl(image.storagePath)}
-                        alt={image.fileName}
-                        className="h-28 w-36 rounded-md border object-cover"
-                      />
+                      <div key={image.id} className="relative">
+                        <img
+                          src={resolveAssetUrl(image.storagePath)}
+                          alt={image.fileName}
+                          className="h-28 w-36 cursor-zoom-in rounded-md border object-cover"
+                          onClick={() => {
+                            setImagePreview({
+                              src: resolveAssetUrl(image.storagePath),
+                              fileName: image.fileName,
+                            });
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="absolute -top-5 -right-2 h-7 px-2 text-xs"
+                          disabled={isDeletingMedia || isUpdatingApproval}
+                          onClick={() => {
+                            onRequestDeleteMedia({
+                              id: image.id,
+                              fileName: image.fileName,
+                              mediaType: "image",
+                            });
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -290,12 +450,25 @@ function DashboardProjectPreviewPage() {
                 ) : (
                   <div className="flex flex-wrap gap-3">
                     {project.videos.map((video) => (
-                      <video
-                        key={video.id}
-                        src={resolveAssetUrl(video.storagePath)}
-                        className="h-28 w-44 rounded-md border bg-black/70 object-cover"
-                        controls
-                      />
+                      <div key={video.id} className="relative">
+                        <video src={resolveAssetUrl(video.storagePath)} className="h-28 w-44 rounded-md border bg-black/70 object-cover" controls />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          className="absolute -top-2 -right-2 h-7 px-2 text-xs"
+                          disabled={isDeletingMedia || isUpdatingApproval}
+                          onClick={() => {
+                            onRequestDeleteMedia({
+                              id: video.id,
+                              fileName: video.fileName,
+                              mediaType: "video",
+                            });
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </div>
                     ))}
                   </div>
                 )}

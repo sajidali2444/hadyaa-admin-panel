@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   type ColumnFiltersState,
@@ -12,50 +12,43 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
-  addProjectMedia,
   deleteProject,
-  deleteProjectImage,
   extractApiErrorMessage,
   getCategories,
-  getProjectById,
   getProjectsForDashboard,
   getUsers,
-  resolveAssetUrl,
-  updateProject,
 } from "@/lib/api";
 import { useAuth } from "@/components/auth-provider";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CurrencySelect } from "@/components/currency-select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import type { Address, Category, Project, User } from "@/types/api";
+import { NotificationToast } from "@/components/ui/notification-toast";
+import type { Category, Project, User } from "@/types/api";
 
 export const Route = createFileRoute("/dashboard/projects/")({
   component: DashboardProjectsPage,
 });
-
-interface ProjectFormState {
-  npoUserId: string;
-  title: string;
-  categoryId: string;
-  startDate: string;
-  endDate: string;
-  description: string;
-  targetAmount: string;
-  currency: string;
-  country: string;
-  state: string;
-  city: string;
-}
 
 interface ProjectTableRow {
   id: string;
   title: string;
   category: string;
   owner: string;
+  createdDate: string;
+  createdDateLabel: string;
+  createdDateSort: number;
   targetAmount: number;
   raisedAmount: number;
   currency: string;
@@ -63,31 +56,6 @@ interface ProjectTableRow {
   status: string;
   project: Project;
 }
-
-interface MediaPreview {
-  id: string;
-  file: File;
-  previewUrl: string;
-}
-
-const MAX_IMAGE_COUNT = 10;
-const MAX_VIDEO_COUNT = 1;
-const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
-const MAX_VIDEO_SIZE_BYTES = 20 * 1024 * 1024;
-
-const EMPTY_FORM: ProjectFormState = {
-  npoUserId: "",
-  title: "",
-  categoryId: "",
-  startDate: "",
-  endDate: "",
-  description: "",
-  targetAmount: "",
-  currency: "USD",
-  country: "",
-  state: "",
-  city: "",
-};
 
 function formatCurrency(amount: number, currency: string): string {
   const normalizedCurrency = (currency || "USD").trim().toUpperCase();
@@ -100,6 +68,35 @@ function formatCurrency(amount: number, currency: string): string {
     }).format(amount);
   } catch {
     return `${amount.toFixed(2)} ${normalizedCurrency}`;
+  }
+}
+
+function toDateEpoch(value: string | undefined | null): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const epoch = new Date(value).getTime();
+  return Number.isNaN(epoch) ? Number.NEGATIVE_INFINITY : epoch;
+}
+
+function getProjectCreatedDate(project: Project): string {
+  return project.createdOn ?? project.createdAt ?? project.startDate;
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  } catch {
+    return value;
   }
 }
 
@@ -118,12 +115,9 @@ function DashboardProjectsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<ProjectFormState>(EMPTY_FORM);
-  const [newEditImages, setNewEditImages] = useState<File[]>([]);
-  const [newEditVideos, setNewEditVideos] = useState<File[]>([]);
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [sorting, setSorting] = useState<SortingState>([{ id: "createdDate", desc: true }]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
 
@@ -143,42 +137,33 @@ function DashboardProjectsPage() {
     [users],
   );
 
-  const selectedEditingProject = useMemo(
-    () => projects.find((project) => project.id === editingProjectId) ?? null,
-    [projects, editingProjectId],
-  );
+  useEffect(() => {
+    if (!errorMessage) {
+      return;
+    }
 
-  const editImagePreviews = useMemo<MediaPreview[]>(
-    () =>
-      newEditImages.map((file, index) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-edit-image-${index}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      })),
-    [newEditImages],
-  );
+    const timeoutId = window.setTimeout(() => {
+      setErrorMessage(null);
+    }, 4500);
 
-  const editVideoPreviews = useMemo<MediaPreview[]>(
-    () =>
-      newEditVideos.map((file, index) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-edit-video-${index}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      })),
-    [newEditVideos],
-  );
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [errorMessage]);
 
   useEffect(() => {
-    return () => {
-      editImagePreviews.forEach((preview) => URL.revokeObjectURL(preview.previewUrl));
-    };
-  }, [editImagePreviews]);
+    if (!successMessage) {
+      return;
+    }
 
-  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setSuccessMessage(null);
+    }, 3500);
+
     return () => {
-      editVideoPreviews.forEach((preview) => URL.revokeObjectURL(preview.previewUrl));
+      window.clearTimeout(timeoutId);
     };
-  }, [editVideoPreviews]);
+  }, [successMessage]);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -214,185 +199,61 @@ function DashboardProjectsPage() {
     setSuccessMessage(null);
   }
 
-  function setEditField<K extends keyof ProjectFormState>(field: K, value: ProjectFormState[K]) {
-    setEditForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function toAddressArray(form: ProjectFormState): Address[] {
-    if (!form.country.trim() && !form.state.trim() && !form.city.trim()) {
-      return [];
-    }
-
-    return [
-      {
-        country: form.country,
-        state: form.state,
-        city: form.city,
-      },
-    ];
-  }
-
-  function projectToForm(project: Project): ProjectFormState {
-    const firstAddress = project.addresses[0];
-
-    return {
-      npoUserId: project.npoUserId,
-      title: project.title,
-      categoryId: String(project.categoryId),
-      startDate: project.startDate,
-      endDate: project.endDate ?? "",
-      description: project.description,
-      targetAmount: String(project.targetAmount),
-      currency: project.currency || "USD",
-      country: firstAddress?.country ?? "",
-      state: firstAddress?.state ?? "",
-      city: firstAddress?.city ?? "",
-    };
-  }
-
-  const openEditor = useCallback((project: Project) => {
-    clearAlerts();
-    setEditingProjectId(project.id);
-    setEditForm(projectToForm(project));
-    setNewEditImages([]);
-    setNewEditVideos([]);
-  }, []);
-
   const onDeleteProject = useCallback(
-    async (project: Project) => {
+    (project: Project) => {
       if (!canManageProjects) {
         return;
       }
 
-      const confirmed = window.confirm(`Delete project \"${project.title}\"?`);
-      if (!confirmed) {
-        return;
-      }
-
       clearAlerts();
-
-      try {
-        await deleteProject(project.id);
-        if (editingProjectId === project.id) {
-          setEditingProjectId(null);
-        }
-        setSuccessMessage("Project deleted successfully.");
-        await loadData();
-      } catch (error) {
-        setErrorMessage(extractApiErrorMessage(error));
-      }
+      setProjectToDelete(project);
     },
-    [canManageProjects, editingProjectId, loadData],
+    [canManageProjects],
   );
 
-  async function onUpdateProject(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedEditingProject || !session) {
+  const confirmDeleteProject = useCallback(async () => {
+    if (!projectToDelete) {
       return;
     }
 
     clearAlerts();
-    setIsUpdating(true);
+    setIsDeletingProject(true);
 
     try {
-      if (selectedEditingProject.images.length + newEditImages.length > MAX_IMAGE_COUNT) {
-        setErrorMessage("Total images cannot exceed 10 per project.");
-        return;
-      }
-
-      if (selectedEditingProject.videos.length + newEditVideos.length > MAX_VIDEO_COUNT) {
-        setErrorMessage("Only 1 video is allowed per project.");
-        return;
-      }
-
-      const oversizedImage = newEditImages.find((file) => file.size > MAX_IMAGE_SIZE_BYTES);
-      if (oversizedImage) {
-        setErrorMessage(`Image '${oversizedImage.name}' exceeds 5 MB.`);
-        return;
-      }
-
-      const oversizedVideo = newEditVideos.find((file) => file.size > MAX_VIDEO_SIZE_BYTES);
-      if (oversizedVideo) {
-        setErrorMessage(`Video '${oversizedVideo.name}' exceeds 20 MB.`);
-        return;
-      }
-
-      await updateProject(selectedEditingProject.id, {
-        npoUserId: editForm.npoUserId,
-        title: editForm.title,
-        categoryId: Number(editForm.categoryId),
-        startDate: editForm.startDate,
-        endDate: editForm.endDate || undefined,
-        description: editForm.description,
-        targetAmount: Number(editForm.targetAmount),
-        currency: editForm.currency,
-        addresses: toAddressArray(editForm),
-      });
-
-      if (newEditImages.length > 0 || newEditVideos.length > 0) {
-        await addProjectMedia(selectedEditingProject.id, {
-          images: newEditImages,
-          videos: newEditVideos,
-        });
-      }
-
-      const latest = await getProjectById(selectedEditingProject.id);
-      setEditForm(projectToForm(latest));
-      setNewEditImages([]);
-      setNewEditVideos([]);
-      setSuccessMessage("Project updated successfully.");
-      await loadData();
+      await deleteProject(projectToDelete.id);
+      setProjects((current) => current.filter((project) => project.id !== projectToDelete.id));
+      setProjectToDelete(null);
+      setSuccessMessage("Project deleted successfully.");
     } catch (error) {
       setErrorMessage(extractApiErrorMessage(error));
     } finally {
-      setIsUpdating(false);
+      setIsDeletingProject(false);
     }
-  }
-
-  async function onDeleteImage(projectImageId: string) {
-    if (!selectedEditingProject) {
-      return;
-    }
-
-    clearAlerts();
-
-    try {
-      await deleteProjectImage(projectImageId);
-      const refreshedProject = await getProjectById(selectedEditingProject.id);
-      setEditForm(projectToForm(refreshedProject));
-      setProjects((current) =>
-        current.map((project) =>
-          project.id === refreshedProject.id
-            ? {
-                ...project,
-                images: refreshedProject.images,
-                videos: refreshedProject.videos,
-              }
-            : project,
-        ),
-      );
-      setSuccessMessage("Project media removed.");
-    } catch (error) {
-      setErrorMessage(extractApiErrorMessage(error));
-    }
-  }
+  }, [projectToDelete]);
 
   const tableRows = useMemo<ProjectTableRow[]>(
     () =>
-      projects.map((project) => ({
-        id: project.id,
-        title: project.title,
-        category: project.category?.name ?? String(project.categoryId),
-        owner:
-          userNameById.get(project.npoUserId) ??
-          (project.npoUserId === userId ? "You" : project.npoUserId),
-        targetAmount: project.targetAmount,
-        raisedAmount: project.raisedAmount,
-        currency: project.currency || "USD",
-        startDate: project.startDate,
-        status: project.isApproved ? "Approved" : "Pending",
-        project,
-      })),
+      projects.map((project) => {
+        const createdDate = getProjectCreatedDate(project);
+
+        return {
+          createdDate,
+          createdDateLabel: formatDateTime(createdDate),
+          createdDateSort: toDateEpoch(createdDate),
+          id: project.id,
+          title: project.title,
+          category: project.category?.name ?? String(project.categoryId),
+          owner:
+            userNameById.get(project.npoUserId) ??
+            (project.npoUserId === userId ? "You" : project.npoUserId),
+          targetAmount: project.targetAmount,
+          raisedAmount: project.raisedAmount,
+          currency: project.currency || "USD",
+          startDate: project.startDate,
+          status: project.isApproved ? "Approved" : "Pending",
+          project,
+        };
+      }),
     [projects, userNameById, userId],
   );
 
@@ -413,6 +274,12 @@ function DashboardProjectsPage() {
       {
         accessorKey: "category",
         header: "Category",
+      },
+      {
+        id: "createdDate",
+        accessorFn: (row) => row.createdDateSort,
+        header: "Created Date",
+        cell: ({ row }) => row.original.createdDateLabel,
       },
       {
         accessorKey: "targetAmount",
@@ -470,10 +337,14 @@ function DashboardProjectsPage() {
                 </Button>
               ) : null}
               <Button
-                type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => openEditor(project)}
+                render={
+                  <Link
+                    to="/dashboard/projects/edit/$projectId"
+                    params={{ projectId: project.id }}
+                  />
+                }
               >
                 Edit
               </Button>
@@ -501,7 +372,7 @@ function DashboardProjectsPage() {
     }
 
     return baseColumns;
-  }, [canManageProjects, isAdmin, onDeleteProject, openEditor, userId]);
+  }, [canManageProjects, isAdmin, onDeleteProject, userId]);
 
   const table = useReactTable({
     data: tableRows,
@@ -533,6 +404,58 @@ function DashboardProjectsPage() {
 
   return (
     <div className="space-y-6">
+      {errorMessage ? (
+        <NotificationToast
+          type="error"
+          message={errorMessage}
+          onClose={() => {
+            setErrorMessage(null);
+          }}
+        />
+      ) : null}
+
+      {successMessage ? (
+        <NotificationToast
+          type="success"
+          message={successMessage}
+          onClose={() => {
+            setSuccessMessage(null);
+          }}
+        />
+      ) : null}
+
+      <AlertDialog
+        open={Boolean(projectToDelete)}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingProject) {
+            setProjectToDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              {projectToDelete
+                ? `Delete "${projectToDelete.title}" permanently? This action cannot be undone.`
+                : "Delete this project permanently? This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingProject}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isDeletingProject}
+              onClick={() => {
+                void confirmDeleteProject();
+              }}
+            >
+              {isDeletingProject ? "Deleting..." : "Delete Project"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -550,18 +473,6 @@ function DashboardProjectsPage() {
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
-          {errorMessage ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {errorMessage}
-            </div>
-          ) : null}
-
-          {successMessage ? (
-            <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
-              {successMessage}
-            </div>
-          ) : null}
-
           <div className="grid gap-3 rounded-md border bg-muted/30 p-3 lg:grid-cols-[1fr_auto_auto_auto_auto] lg:items-end">
             <div className="space-y-1">
               <Label htmlFor="project-search">Search</Label>
@@ -781,347 +692,6 @@ function DashboardProjectsPage() {
         </CardContent>
       </Card>
 
-      {selectedEditingProject ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Edit Project</CardTitle>
-            <CardDescription>Update fields, images, and approval state.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form className="grid gap-4 md:grid-cols-2" onSubmit={onUpdateProject}>
-              {isAdmin ? (
-                <div className="space-y-2">
-                  <Label htmlFor="edit-npo">NPO Owner</Label>
-                  <select
-                    id="edit-npo"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                    value={editForm.npoUserId}
-                    onChange={(event) => setEditField("npoUserId", event.target.value)}
-                    required
-                  >
-                    <option value="">Select NPO user</option>
-                    {npoUsers.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.firstName} {user.lastName} ({user.email})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-title">Project Title</Label>
-                <Input
-                  id="edit-title"
-                  value={editForm.title}
-                  onChange={(event) => setEditField("title", event.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-category">Category</Label>
-                <select
-                  id="edit-category"
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-                  value={editForm.categoryId}
-                  onChange={(event) => setEditField("categoryId", event.target.value)}
-                  required
-                >
-                  <option value="">Select category</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-target">Target Amount</Label>
-                <Input
-                  id="edit-target"
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  value={editForm.targetAmount}
-                  onChange={(event) => setEditField("targetAmount", event.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-currency">Currency</Label>
-                <CurrencySelect
-                  id="edit-currency"
-                  name="currency"
-                  value={editForm.currency}
-                  onChange={(value) => setEditField("currency", value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-start-date">Start Date</Label>
-                <Input
-                  id="edit-start-date"
-                  type="date"
-                  value={editForm.startDate}
-                  onChange={(event) => setEditField("startDate", event.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-end-date">End Date (optional)</Label>
-                <Input
-                  id="edit-end-date"
-                  type="date"
-                  value={editForm.endDate}
-                  onChange={(event) => setEditField("endDate", event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="edit-description">Description</Label>
-                <Textarea
-                  id="edit-description"
-                  value={editForm.description}
-                  onChange={(event) => setEditField("description", event.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-country">Address Country</Label>
-                <Input
-                  id="edit-country"
-                  value={editForm.country}
-                  onChange={(event) => setEditField("country", event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-state">Address State</Label>
-                <Input
-                  id="edit-state"
-                  value={editForm.state}
-                  onChange={(event) => setEditField("state", event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-city">Address City</Label>
-                <Input
-                  id="edit-city"
-                  value={editForm.city}
-                  onChange={(event) => setEditField("city", event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-images">Add More Images</Label>
-                <Input
-                  id="edit-images"
-                  type="file"
-                  multiple
-                  accept="image/*"
-                  onChange={(event) => {
-                    const files = event.target.files ? Array.from(event.target.files) : [];
-                    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-                    const oversized = imageFiles.find((file) => file.size > MAX_IMAGE_SIZE_BYTES);
-                    if (oversized) {
-                      setErrorMessage(`Image '${oversized.name}' exceeds 5 MB.`);
-                      event.target.value = "";
-                      return;
-                    }
-
-                    const remainingSlots = MAX_IMAGE_COUNT - selectedEditingProject.images.length;
-                    setNewEditImages((current) => {
-                      const merged = [...current, ...imageFiles];
-                      if (merged.length > remainingSlots) {
-                        setErrorMessage("Total images cannot exceed 10 per project.");
-                      } else {
-                        setErrorMessage(null);
-                      }
-                      return merged.slice(0, Math.max(remainingSlots, 0));
-                    });
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-videos">Add More Videos</Label>
-                <Input
-                  id="edit-videos"
-                  type="file"
-                  multiple
-                  accept="video/*"
-                  onChange={(event) => {
-                    const files = event.target.files ? Array.from(event.target.files) : [];
-                    const videoFiles = files.filter((file) => file.type.startsWith("video/"));
-                    const oversized = videoFiles.find((file) => file.size > MAX_VIDEO_SIZE_BYTES);
-                    if (oversized) {
-                      setErrorMessage(`Video '${oversized.name}' exceeds 20 MB.`);
-                      event.target.value = "";
-                      return;
-                    }
-
-                    const remainingSlots = MAX_VIDEO_COUNT - selectedEditingProject.videos.length;
-                    setNewEditVideos((current) => {
-                      const merged = [...current, ...videoFiles];
-                      if (merged.length > remainingSlots) {
-                        setErrorMessage("Only 1 video is allowed per project.");
-                      } else {
-                        setErrorMessage(null);
-                      }
-                      return merged.slice(0, Math.max(remainingSlots, 0));
-                    });
-                    event.target.value = "";
-                  }}
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>New Image Preview</Label>
-                {editImagePreviews.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No new images selected.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {editImagePreviews.map((preview, index) => (
-                      <div key={preview.id} className="relative">
-                        <img
-                          src={preview.previewUrl}
-                          alt={preview.file.name}
-                          className="h-20 w-24 rounded-md border object-cover"
-                        />
-                        <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
-                          variant="destructive"
-                          type="button"
-                          onClick={() => {
-                            setNewEditImages((current) =>
-                              current.filter((_, itemIndex) => itemIndex !== index),
-                            );
-                          }}
-                        >
-                          X
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>New Video Preview</Label>
-                {editVideoPreviews.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No new videos selected.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {editVideoPreviews.map((preview, index) => (
-                      <div key={preview.id} className="relative">
-                        <video
-                          src={preview.previewUrl}
-                          className="h-20 w-32 rounded-md border bg-black/70 object-cover"
-                          controls
-                        />
-                        <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
-                          variant="destructive"
-                          type="button"
-                          onClick={() => {
-                            setNewEditVideos((current) =>
-                              current.filter((_, itemIndex) => itemIndex !== index),
-                            );
-                          }}
-                        >
-                          X
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>Uploaded Images</Label>
-                {selectedEditingProject.images.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No uploaded images.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedEditingProject.images.map((image) => (
-                      <div key={image.id} className="relative">
-                        <img
-                          src={resolveAssetUrl(image.storagePath)}
-                          alt={image.fileName}
-                          className="h-20 w-24 rounded-md border object-cover"
-                        />
-                        <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
-                          variant="destructive"
-                          type="button"
-                          onClick={() => {
-                            void onDeleteImage(image.id);
-                          }}
-                        >
-                          X
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>Uploaded Videos</Label>
-                {selectedEditingProject.videos.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No uploaded videos.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {selectedEditingProject.videos.map((video) => (
-                      <div key={video.id} className="relative">
-                        <video
-                          src={resolveAssetUrl(video.storagePath)}
-                          className="h-20 w-32 rounded-md border bg-black/70 object-cover"
-                          controls
-                        />
-                        <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
-                          variant="destructive"
-                          type="button"
-                          onClick={() => {
-                            void onDeleteImage(video.id);
-                          }}
-                        >
-                          X
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="md:col-span-2 flex flex-wrap gap-2">
-                <Button type="submit" disabled={isUpdating}>
-                  {isUpdating ? "Updating..." : "Save Changes"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingProjectId(null);
-                    setNewEditImages([]);
-                    setNewEditVideos([]);
-                  }}
-                >
-                  Close Editor
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { Route as DashboardAdminRouteImport } from './routes/dashboard.admin'
 import { Route as DashboardProjectsIndexRouteImport } from './routes/dashboard.projects.index'
 import { Route as DashboardProjectsNewRouteImport } from './routes/dashboard.projects.new'
 import { Route as DashboardProjectsPreviewProjectIdRouteImport } from './routes/dashboard.projects.preview.$projectId'
+import { Route as DashboardProjectsEditProjectIdRouteImport } from './routes/dashboard.projects.edit.$projectId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -71,6 +72,12 @@ const DashboardProjectsPreviewProjectIdRoute =
     path: '/preview/$projectId',
     getParentRoute: () => DashboardProjectsRoute,
   } as any)
+const DashboardProjectsEditProjectIdRoute =
+  DashboardProjectsEditProjectIdRouteImport.update({
+    id: '/edit/$projectId',
+    path: '/edit/$projectId',
+    getParentRoute: () => DashboardProjectsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/projects/new': typeof DashboardProjectsNewRoute
   '/dashboard/projects/': typeof DashboardProjectsIndexRoute
+  '/dashboard/projects/edit/$projectId': typeof DashboardProjectsEditProjectIdRoute
   '/dashboard/projects/preview/$projectId': typeof DashboardProjectsPreviewProjectIdRoute
 }
 export interface FileRoutesByTo {
@@ -92,6 +100,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardIndexRoute
   '/dashboard/projects/new': typeof DashboardProjectsNewRoute
   '/dashboard/projects': typeof DashboardProjectsIndexRoute
+  '/dashboard/projects/edit/$projectId': typeof DashboardProjectsEditProjectIdRoute
   '/dashboard/projects/preview/$projectId': typeof DashboardProjectsPreviewProjectIdRoute
 }
 export interface FileRoutesById {
@@ -105,6 +114,7 @@ export interface FileRoutesById {
   '/dashboard/': typeof DashboardIndexRoute
   '/dashboard/projects/new': typeof DashboardProjectsNewRoute
   '/dashboard/projects/': typeof DashboardProjectsIndexRoute
+  '/dashboard/projects/edit/$projectId': typeof DashboardProjectsEditProjectIdRoute
   '/dashboard/projects/preview/$projectId': typeof DashboardProjectsPreviewProjectIdRoute
 }
 export interface FileRouteTypes {
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/dashboard/'
     | '/dashboard/projects/new'
     | '/dashboard/projects/'
+    | '/dashboard/projects/edit/$projectId'
     | '/dashboard/projects/preview/$projectId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/dashboard/projects/new'
     | '/dashboard/projects'
+    | '/dashboard/projects/edit/$projectId'
     | '/dashboard/projects/preview/$projectId'
   id:
     | '__root__'
@@ -141,6 +153,7 @@ export interface FileRouteTypes {
     | '/dashboard/'
     | '/dashboard/projects/new'
     | '/dashboard/projects/'
+    | '/dashboard/projects/edit/$projectId'
     | '/dashboard/projects/preview/$projectId'
   fileRoutesById: FileRoutesById
 }
@@ -222,18 +235,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardProjectsPreviewProjectIdRouteImport
       parentRoute: typeof DashboardProjectsRoute
     }
+    '/dashboard/projects/edit/$projectId': {
+      id: '/dashboard/projects/edit/$projectId'
+      path: '/edit/$projectId'
+      fullPath: '/dashboard/projects/edit/$projectId'
+      preLoaderRoute: typeof DashboardProjectsEditProjectIdRouteImport
+      parentRoute: typeof DashboardProjectsRoute
+    }
   }
 }
 
 interface DashboardProjectsRouteChildren {
   DashboardProjectsNewRoute: typeof DashboardProjectsNewRoute
   DashboardProjectsIndexRoute: typeof DashboardProjectsIndexRoute
+  DashboardProjectsEditProjectIdRoute: typeof DashboardProjectsEditProjectIdRoute
   DashboardProjectsPreviewProjectIdRoute: typeof DashboardProjectsPreviewProjectIdRoute
 }
 
 const DashboardProjectsRouteChildren: DashboardProjectsRouteChildren = {
   DashboardProjectsNewRoute: DashboardProjectsNewRoute,
   DashboardProjectsIndexRoute: DashboardProjectsIndexRoute,
+  DashboardProjectsEditProjectIdRoute: DashboardProjectsEditProjectIdRoute,
   DashboardProjectsPreviewProjectIdRoute:
     DashboardProjectsPreviewProjectIdRoute,
 }
