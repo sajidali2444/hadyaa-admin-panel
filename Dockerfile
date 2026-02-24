@@ -1,48 +1,35 @@
-# versions
-FROM node:25-trixie-slim AS base
+FROM node:22-bookworm-slim AS builder
 
-# builder stage
-FROM base AS builder
+WORKDIR /app
 
-RUN apt-get update && apt-get -y install --no-install-recommends \
-  ca-certificates \
-  curl
-
-# Install pnpm
-RUN curl -fsSL https://get.pnpm.io/install.sh | \
-  ENV="$HOME/.bashrc" SHELL=/bin/bash bash -
-
-# Set pnpm in PATH
-ENV PNPM_HOME="/root/.local/share/pnpm"
+ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
-WORKDIR /app
+RUN corepack enable
 
-# Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies
-RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   pnpm install --frozen-lockfile
 
-# Copy source code
 COPY . .
 
-# Build the application
-RUN node --run build
+ARG VITE_API_BASE_URL="https://app3.kualifai.com/api"
+ENV VITE_API_BASE_URL="${VITE_API_BASE_URL}"
 
-# runner stage
-FROM base AS runner
+RUN pnpm build
+
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
-# Copy built output
-COPY --from=builder /app/.output ./.output
-COPY --from=builder /app/package.json ./
-
-# Expose port
-EXPOSE 3000
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
 ENV PORT=3000
 
-# Start the server
-CMD ["node", "--run", "start"]
+COPY --from=builder /app/.output ./.output
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+
+CMD ["node", "./.output/server/index.mjs"]

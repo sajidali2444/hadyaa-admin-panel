@@ -32,3 +32,6 @@ node_modules/
 
 # Build outputs
 .output/
+
+# Generated deployment config
+deploy/caddy/Caddyfile

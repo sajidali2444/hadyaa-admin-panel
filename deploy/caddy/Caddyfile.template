@@ -1,0 +1,9 @@
+{
+  # Copy this file to deploy/caddy/Caddyfile or use
+  # scripts/deploy-production-docker.sh to generate it.
+  email admin@example.com
+}
+
+example.com {
+  reverse_proxy app:3000
+}
