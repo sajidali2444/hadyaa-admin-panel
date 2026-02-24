@@ -34,4 +34,4 @@ node_modules/
 .output/
 
 # Generated deployment config
-deploy/caddy/Caddyfile
+deploy/nginx/default.conf

@@ -48,23 +48,27 @@ This project reads the frontend API base URL from `VITE_API_BASE_URL`.
 
 ### Fully Dockerized deployment (recommended)
 
-1. Ensure DNS already points your domain to the server IP and ports `80/443` are open.
+1. Ensure DNS already points your domain to the server IP and port `80` is open.
 2. Run the deploy script:
 
 ```bash
 chmod +x scripts/deploy-production-docker.sh
-./scripts/deploy-production-docker.sh --domain YOUR_DOMAIN --email YOUR_EMAIL
+./scripts/deploy-production-docker.sh --domain YOUR_DOMAIN
 ```
 
 Optional flags:
 - `--api-url https://app3.kualifai.com/api`
 - `--with-www`
+- `--email YOUR_EMAIL` (deprecated and ignored)
 
 What this script does:
-- Generates `deploy/caddy/Caddyfile` with your domain + email
+- Generates `deploy/nginx/default.conf` with your domain
 - Builds app image with your `VITE_API_BASE_URL`
-- Starts `app` + `caddy` via `docker compose`
-- Terminates TLS and reverse-proxies traffic to the app container
+- Starts `app` + `nginx` via `docker compose`
+- Reverse-proxies traffic to the app container on port `3000`
+
+Note:
+- This setup serves HTTP by default. If you need HTTPS, terminate TLS at your load balancer/CDN or extend Nginx with certificates.
 
 Useful commands:
 

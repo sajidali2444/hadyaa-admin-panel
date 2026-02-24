@@ -5,12 +5,12 @@ set -euo pipefail
 APP_PORT="3000"
 API_URL_DEFAULT="https://app3.kualifai.com/api"
 COMPOSE_FILE="docker-compose.production.yml"
-GENERATED_CADDYFILE="deploy/caddy/Caddyfile"
+GENERATED_NGINX_CONF="deploy/nginx/default.conf"
 
 DOMAIN=""
-EMAIL=""
 API_URL="$API_URL_DEFAULT"
 WITH_WWW="false"
+LEGACY_EMAIL=""
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -18,21 +18,21 @@ APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/deploy-production-docker.sh --domain <domain> --email <email> [options]
+  ./scripts/deploy-production-docker.sh --domain <domain> [options]
 
 Required:
   --domain <domain>       Main domain (example: admin.example.com)
-  --email <email>         Email for TLS certificate registration
 
 Options:
   --api-url <url>         Frontend API base URL (default: https://app3.kualifai.com/api)
   --with-www              Also configure/use www.<domain>
+  --email <email>         Deprecated (ignored; kept for backward compatibility)
   --help                  Show this help
 
 Examples:
-  ./scripts/deploy-production-docker.sh --domain admin.example.com --email ops@example.com
-  ./scripts/deploy-production-docker.sh --domain example.com --email ops@example.com --with-www
-  ./scripts/deploy-production-docker.sh --domain admin.example.com --email ops@example.com --api-url https://app3.kualifai.com/api
+  ./scripts/deploy-production-docker.sh --domain admin.example.com
+  ./scripts/deploy-production-docker.sh --domain example.com --with-www
+  ./scripts/deploy-production-docker.sh --domain admin.example.com --api-url https://app3.kualifai.com/api
 EOF
 }
 
@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --email)
-      EMAIL="${2:-}"
+      LEGACY_EMAIL="${2:-}"
       shift 2
       ;;
     --api-url)
@@ -78,7 +78,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$DOMAIN" ]] || fail "--domain is required"
-[[ -n "$EMAIL" ]] || fail "--email is required"
 
 require_command docker
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
@@ -97,27 +96,51 @@ fi
 log "Using app directory: $APP_DIR"
 cd "$APP_DIR"
 
+if [[ -n "$LEGACY_EMAIL" ]]; then
+  log "--email is deprecated and ignored for Nginx deployment"
+fi
+
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   fail "Missing compose file: $COMPOSE_FILE"
 fi
 
-log "Generating Caddy config: $GENERATED_CADDYFILE"
-mkdir -p "$(dirname "$GENERATED_CADDYFILE")"
-cat > "$GENERATED_CADDYFILE" <<EOF
-{
-  email $EMAIL
-}
+log "Generating Nginx config: $GENERATED_NGINX_CONF"
+mkdir -p "$(dirname "$GENERATED_NGINX_CONF")"
+cat > "$GENERATED_NGINX_CONF" <<EOF
+server {
+  listen 80;
+  server_name $PRIMARY_DOMAIN;
 
-$PRIMARY_DOMAIN {
-  reverse_proxy app:$APP_PORT
+  location / {
+    proxy_pass http://app:$APP_PORT;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
 }
 EOF
 
 if [[ -n "$SECONDARY_DOMAIN" ]]; then
-  cat >> "$GENERATED_CADDYFILE" <<EOF
+  cat >> "$GENERATED_NGINX_CONF" <<EOF
 
-$SECONDARY_DOMAIN {
-  reverse_proxy app:$APP_PORT
+server {
+  listen 80;
+  server_name $SECONDARY_DOMAIN;
+
+  location / {
+    proxy_pass http://app:$APP_PORT;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
 }
 EOF
 fi
@@ -127,10 +150,10 @@ export VITE_API_BASE_URL="$API_URL"
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
 log "Deployment complete"
-printf "\nApp URL: https://%s\n" "$DISPLAY_DOMAIN"
-printf "Donation URL: https://%s/donations\n" "$DISPLAY_DOMAIN"
+printf "\nApp URL: http://%s\n" "$DISPLAY_DOMAIN"
+printf "Donation URL: http://%s/donations\n" "$DISPLAY_DOMAIN"
 if [[ -n "$SECONDARY_DOMAIN" ]]; then
-  printf "Additional domain: https://%s\n" "$SECONDARY_DOMAIN"
+  printf "Additional domain: http://%s\n" "$SECONDARY_DOMAIN"
 fi
 printf "Compose status: docker compose -f %s ps\n" "$COMPOSE_FILE"
 printf "Compose logs: docker compose -f %s logs -f\n" "$COMPOSE_FILE"
