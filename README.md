@@ -40,6 +40,79 @@ pnpm build
 pnpm start
 ```
 
+## Production Deployment
+
+This project reads the frontend API base URL from `VITE_API_BASE_URL`.
+
+- Default production file: `.env.production`
+- Current production API value: `https://app3.kualifai.com/api`
+
+### One-command deploy script (recommended)
+
+```bash
+chmod +x scripts/deploy-production.sh
+./scripts/deploy-production.sh --domain YOUR_DOMAIN --email YOUR_EMAIL
+```
+
+Optional flags:
+- `--api-url https://app3.kualifai.com/api`
+- `--with-www`
+- `--skip-certbot`
+
+What the script does:
+- Writes `.env.production` with your API URL
+- Runs `pnpm install --frozen-lockfile` and `pnpm build`
+- Installs/uses PM2 and starts `hadyaa-admin-panel`
+- Installs/configures Nginx reverse proxy
+- Issues HTTPS certs via Certbot (unless `--skip-certbot`)
+
+### PM2 + Nginx + HTTPS
+
+1. Install runtime tools on server:
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo npm install -g pm2
+```
+
+2. Build and start app with PM2:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm build
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
+```
+
+3. Configure Nginx reverse proxy:
+
+```bash
+sudo cp deploy/nginx/hadyaa-admin.conf /etc/nginx/sites-available/hadyaa-admin
+sudo ln -s /etc/nginx/sites-available/hadyaa-admin /etc/nginx/sites-enabled/hadyaa-admin
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Before reloading Nginx, edit `/etc/nginx/sites-available/hadyaa-admin` and replace:
+- `YOUR_DOMAIN`
+- `www.YOUR_DOMAIN`
+
+4. Enable HTTPS certificate:
+
+```bash
+sudo certbot --nginx -d YOUR_DOMAIN -d www.YOUR_DOMAIN
+```
+
+5. Useful PM2 commands:
+
+```bash
+pm2 status
+pm2 logs hadyaa-admin-panel
+pm2 restart hadyaa-admin-panel
+```
+
 ## Project Structure
 
 ```

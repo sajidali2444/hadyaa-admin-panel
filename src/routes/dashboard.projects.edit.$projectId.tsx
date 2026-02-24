@@ -598,7 +598,7 @@ function EditProjectPage() {
                           className="h-20 w-24 rounded-md border object-cover"
                         />
                         <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                          className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                           variant="destructive"
                           type="button"
                           onClick={() => {
@@ -629,7 +629,7 @@ function EditProjectPage() {
                           controls
                         />
                         <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                          className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                           variant="destructive"
                           type="button"
                           onClick={() => {
@@ -660,7 +660,7 @@ function EditProjectPage() {
                           className="h-20 w-24 rounded-md border object-cover"
                         />
                         <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                          className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                           variant="destructive"
                           type="button"
                           disabled={isDeletingMedia}
@@ -690,7 +690,7 @@ function EditProjectPage() {
                           controls
                         />
                         <Button
-                          className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                          className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                           variant="destructive"
                           type="button"
                           disabled={isDeletingMedia}

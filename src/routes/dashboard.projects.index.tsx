@@ -473,7 +473,7 @@ function DashboardProjectsPage() {
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3 lg:grid-cols-[1fr_auto_auto_auto_auto] lg:items-end">
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] xl:items-end">
             <div className="space-y-1">
               <Label htmlFor="project-search">Search</Label>
               <Input

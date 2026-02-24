@@ -15,7 +15,7 @@ export function NotificationToast({ type, message, onClose }: Readonly<Notificat
   const isSuccess = type === "success";
 
   return (
-    <div className="pointer-events-none fixed top-4 right-4 z-[60] w-[calc(100vw-2rem)] max-w-sm animate-in fade-in slide-in-from-top-2 duration-200">
+    <div className="pointer-events-none fixed inset-x-4 top-4 z-[60] animate-in fade-in slide-in-from-top-2 duration-200 sm:inset-x-auto sm:right-4 sm:w-full sm:max-w-sm">
       <div
         className={cn(
           "pointer-events-auto rounded-xl border px-4 py-3 shadow-lg backdrop-blur",

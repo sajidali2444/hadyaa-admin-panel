@@ -425,7 +425,7 @@ function DashboardProjectPreviewPage() {
                           type="button"
                           size="sm"
                           variant="destructive"
-                          className="absolute -top-5 -right-2 h-7 px-2 text-xs"
+                          className="absolute top-1 right-1 h-7 px-2 text-xs"
                           disabled={isDeletingMedia || isUpdatingApproval}
                           onClick={() => {
                             onRequestDeleteMedia({
@@ -456,7 +456,7 @@ function DashboardProjectPreviewPage() {
                           type="button"
                           size="sm"
                           variant="destructive"
-                          className="absolute -top-2 -right-2 h-7 px-2 text-xs"
+                          className="absolute top-1 right-1 h-7 px-2 text-xs"
                           disabled={isDeletingMedia || isUpdatingApproval}
                           onClick={() => {
                             onRequestDeleteMedia({

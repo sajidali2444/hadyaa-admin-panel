@@ -35,16 +35,23 @@ function DashboardLayout() {
   const path = routerState.location.pathname;
 
   return (
-    <div className="min-h-screen bg-muted/30">
+    <div className="min-h-screen overflow-x-clip bg-muted/30">
       <header className="border-b bg-background">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Hadyaa Admin Panel</p>
-            <h1 className="text-xl font-semibold">Welcome, {session.user.displayName || session.user.email}</h1>
-            <p className="text-sm text-muted-foreground">Role: {session.user.role}</p>
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-sm font-extrabold tracking-wide text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+              H
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Hadyaa Admin Panel</p>
+              <h1 className="truncate text-lg font-semibold sm:text-xl">
+                Welcome, {session.user.displayName || session.user.email}
+              </h1>
+              <p className="text-sm text-muted-foreground">Role: {session.user.role}</p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:self-start">
             <ModeToggle />
             <Button
               type="button"
@@ -61,7 +68,7 @@ function DashboardLayout() {
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid w-full max-w-7xl gap-4 px-4 py-5 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-6">
         <aside className="rounded-xl border bg-background p-3">
           <nav className="space-y-1">
             <SideNavItem
@@ -87,7 +94,7 @@ function DashboardLayout() {
           </nav>
         </aside>
 
-        <main className="space-y-4">
+        <main className="min-w-0 space-y-4">
           <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
             <LayoutDashboard className="size-4" />
             Connected to backend: <code>{API_BASE_URL}</code>

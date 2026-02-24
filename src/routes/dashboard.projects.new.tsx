@@ -439,7 +439,7 @@ function CreateProjectPage() {
                         className="h-24 w-28 rounded-md border object-cover"
                       />
                       <Button
-                        className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                        className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                         variant="destructive"
                         type="button"
                         onClick={() => {
@@ -468,7 +468,7 @@ function CreateProjectPage() {
                         controls
                       />
                       <Button
-                        className="absolute -top-2 -right-2 z-10 h-7 w-7 rounded-full p-0 shadow-md"
+                        className="absolute top-1 right-1 z-10 h-7 w-7 rounded-full p-0 shadow-md"
                         variant="destructive"
                         type="button"
                         onClick={() => {
