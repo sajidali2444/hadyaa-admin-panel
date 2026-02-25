@@ -3,7 +3,7 @@
 set -euo pipefail
 
 APP_PORT="3000"
-HOST_PORT="3000"
+HOST_PORT="8080"
 API_URL_DEFAULT="https://app3.kualifai.com/api"
 COMPOSE_FILE="docker-compose.production.yml"
 GENERATED_NGINX_CONF="deploy/nginx/default.conf"
@@ -22,7 +22,7 @@ Usage:
   ./scripts/deploy-production-docker.sh --domain <domain> [options]
 
 Required:
-  --domain <domain>       Main domain (example: admin.example.com)
+  --domain <domain>       Main domain host (example: admin.example.com; no http/https)
 
 Options:
   --api-url <url>         Frontend API base URL (default: https://app3.kualifai.com/api)
@@ -44,6 +44,17 @@ log() {
 fail() {
   printf "\n[deploy-docker][error] %s\n" "$1" >&2
   exit 1
+}
+
+normalize_host() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  value="${value%%\?*}"
+  value="${value%%\#*}"
+  value="${value%%:*}"
+  printf "%s" "$value"
 }
 
 require_command() {
@@ -79,6 +90,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$DOMAIN" ]] || fail "--domain is required"
+RAW_DOMAIN="$DOMAIN"
+DOMAIN="$(normalize_host "$DOMAIN")"
+[[ -n "$DOMAIN" ]] || fail "--domain must include a valid host (example: admin.example.com)"
+if [[ "$RAW_DOMAIN" != "$DOMAIN" ]]; then
+  log "Normalized --domain to host: $DOMAIN"
+fi
 
 require_command docker
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
