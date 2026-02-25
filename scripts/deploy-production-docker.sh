@@ -3,6 +3,7 @@
 set -euo pipefail
 
 APP_PORT="3000"
+HOST_PORT="3000"
 API_URL_DEFAULT="https://app3.kualifai.com/api"
 COMPOSE_FILE="docker-compose.production.yml"
 GENERATED_NGINX_CONF="deploy/nginx/default.conf"
@@ -150,10 +151,10 @@ export VITE_API_BASE_URL="$API_URL"
 docker compose -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
 log "Deployment complete"
-printf "\nApp URL: http://%s\n" "$DISPLAY_DOMAIN"
-printf "Donation URL: http://%s/donations\n" "$DISPLAY_DOMAIN"
+printf "\nApp URL: http://%s:%s\n" "$DISPLAY_DOMAIN" "$HOST_PORT"
+printf "Donation URL: http://%s:%s/donations\n" "$DISPLAY_DOMAIN" "$HOST_PORT"
 if [[ -n "$SECONDARY_DOMAIN" ]]; then
-  printf "Additional domain: http://%s\n" "$SECONDARY_DOMAIN"
+  printf "Additional domain: http://%s:%s\n" "$SECONDARY_DOMAIN" "$HOST_PORT"
 fi
 printf "Compose status: docker compose -f %s ps\n" "$COMPOSE_FILE"
 printf "Compose logs: docker compose -f %s logs -f\n" "$COMPOSE_FILE"
