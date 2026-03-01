@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS builder
+FROM node:25-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -19,7 +19,7 @@ ENV VITE_API_BASE_URL="${VITE_API_BASE_URL}"
 
 RUN pnpm build
 
-FROM node:22-bookworm-slim AS runner
+FROM node:25-bookworm-slim AS runner
 
 WORKDIR /app
 
